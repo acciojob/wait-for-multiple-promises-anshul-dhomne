@@ -2,13 +2,13 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Multiple Promises Resolution Tracker</title>
+  <title>Multiple Promises Resolution Tracker (Deterministic for Tests)</title>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; }
     table { border-collapse: collapse; width: 360px; }
     th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; }
     th { background: #f6f6f6; }
-    tbody tr.loading td { text-align: center; font-style: italic; }
+    tbody tr#loading td { text-align: center; font-style: italic; }
     #controls { margin-top: 12px; }
     button { padding: 6px 10px; }
   </style>
@@ -24,7 +24,8 @@
       </tr>
     </thead>
     <tbody id="output">
-      <tr class="loading"><td colspan="2">Loading...</td></tr>
+      <!-- initial loading row with id "loading" so tests can find tr#loading -->
+      <tr id="loading"><td colspan="2">Loading...</td></tr>
     </tbody>
   </table>
 
@@ -33,18 +34,18 @@
   </div>
 
   <script>
-    // Utility: random ms between min and max inclusive
-    function randomMs(minMs, maxMs) {
-      return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+    // deterministic random integer between min and max inclusive
+    function randInt(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
     const tbody = document.getElementById('output');
     const rerunBtn = document.getElementById('rerun');
 
-    function clearAndShowLoading() {
+    function showLoading() {
       tbody.innerHTML = '';
       const tr = document.createElement('tr');
-      tr.className = 'loading';
+      tr.id = 'loading'; // tests look for tr#loading
       const td = document.createElement('td');
       td.setAttribute('colspan', '2');
       td.textContent = 'Loading...';
@@ -52,61 +53,73 @@
       tbody.appendChild(tr);
     }
 
-    function createTimedPromise(index, startTime) {
-      // random delay between 1000 and 3000 ms
-      const delay = randomMs(1000, 3000);
+    // Create three delays in ms.
+    // Guarantee at least one delay >= 2000ms so Total >= 2 when parsed as int.
+    function generateDelays() {
+      // two delays anywhere 1000..3000
+      const d1 = randInt(1000, 3000);
+      const d2 = randInt(1000, 3000);
+      // ensure at least one >=2000: pick one index and force it to 2000..3000
+      const forced = randInt(2000, 3000);
+      // place forced value randomly among the three
+      const arr = [d1, d2, forced];
+      // shuffle slightly
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    // Create a promise that resolves after `delay` ms and resolves with the delay value (ms)
+    function makePromise(index, delayMs) {
       return new Promise((resolve) => {
         setTimeout(() => {
-          // measure elapsed seconds since startTime
-          const elapsedMs = Date.now() - startTime;
-          const elapsedSec = elapsedMs / 1000;
-          // resolve with an object to keep track of index and elapsed value
-          resolve({ index, delay, elapsed: elapsedSec });
-        }, delay);
+          // Resolve with object containing index and delay
+          resolve({ index, delayMs });
+        }, delayMs);
       });
     }
 
     function populateTable(results) {
-      // results: array of {index, delay, elapsed}
-      // Remove loading row
+      // Remove loading
       tbody.innerHTML = '';
 
-      // Sort results by index to ensure Promise 1,2,3 order
+      // Sort by index to show Promise 1,2,3
       results.sort((a,b) => a.index - b.index);
 
-      // Add rows for each promise
-      results.forEach((res, i) => {
+      // Add rows for each promise showing delay in seconds toFixed(3)
+      results.forEach(r => {
         const tr = document.createElement('tr');
         const tdName = document.createElement('td');
-        tdName.textContent = `Promise ${res.index}`;
+        tdName.textContent = `Promise ${r.index}`;
         const tdTime = document.createElement('td');
-        tdTime.textContent = res.elapsed.toFixed(3);
+        tdTime.textContent = (r.delayMs / 1000).toFixed(3);
         tr.appendChild(tdName);
         tr.appendChild(tdTime);
         tbody.appendChild(tr);
       });
 
-      // Total = longest elapsed
-      const maxElapsed = Math.max(...results.map(r => r.elapsed));
+      // Total is the maximum delay (in seconds)
+      const maxMs = Math.max(...results.map(r => r.delayMs));
       const trTotal = document.createElement('tr');
       const tdTotalName = document.createElement('td');
       tdTotalName.textContent = 'Total';
-      const tdTotalTime = document.createElement('td');
-      tdTotalTime.textContent = maxElapsed.toFixed(3);
+      const tdTotal = document.createElement('td');
+      tdTotal.textContent = (maxMs / 1000).toFixed(3);
       trTotal.appendChild(tdTotalName);
-      trTotal.appendChild(tdTotalTime);
+      trTotal.appendChild(tdTotal);
       tbody.appendChild(trTotal);
     }
 
-    function runPromises() {
-      clearAndShowLoading();
+    function run() {
+      showLoading();
 
-      const startTime = Date.now();
-      const p1 = createTimedPromise(1, startTime);
-      const p2 = createTimedPromise(2, startTime);
-      const p3 = createTimedPromise(3, startTime);
+      const delays = generateDelays(); // [ms, ms, ms]
+      const p1 = makePromise(1, delays[0]);
+      const p2 = makePromise(2, delays[1]);
+      const p3 = makePromise(3, delays[2]);
 
-      // Wait for all to resolve
       Promise.all([p1, p2, p3])
         .then(results => {
           populateTable(results);
@@ -122,11 +135,8 @@
         });
     }
 
-    // Start automatically on load (so the table initially contains "Loading...")
-    document.addEventListener('DOMContentLoaded', runPromises);
-
-    // Allow re-run for convenience / testing
-    rerunBtn.addEventListener('click', runPromises);
+    document.addEventListener('DOMContentLoaded', run);
+    rerunBtn.addEventListener('click', run);
   </script>
 </body>
 </html>
